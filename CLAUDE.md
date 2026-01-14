@@ -4,164 +4,187 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト概要
 
-このリポジトリには、Mistral AI OCR APIを使用したPDF→Markdown変換ツールが2つ含まれています:
+Mistral AI OCR APIを使用したPDF→Markdown変換CLIツール。
+図表自動付番 (図1, 図2... / 表1, 表2...) に対応。
 
-1. **CLIツール** (`MarkdownGen.py`) - 単一PDFを処理するPythonスクリプト
-2. **Webアプリケーション** (`mistral-ocr-web/`) - 複数PDFを統合処理するNext.jsアプリ
+## 技術スタック
 
-## 開発環境のセットアップ
-
-### 仮想環境の有効化
-```bash
-source .venv/bin/activate
-```
-
-### 必要なパッケージのインストール
-主要な依存関係:
-- `mistralai`: Mistral AI API クライアント
-- その他の依存関係は`.venv`にインストール済み
-
-新しい依存関係を追加する場合:
-```bash
-pip install <package-name>
-```
-
-### 環境変数の設定
-`.env` ファイルに以下を設定:
-```
-MISTRALAI_API_KEY=your_api_key_here
-```
-
-**重要**: `.env` ファイルには実際のAPIキーが含まれているため、Gitにコミットしないこと。
+- **言語**: Python 3.11+
+- **パッケージ管理**: uv
+- **CLI**: Click
+- **API**: mistralai Python SDK
+- **出力**: rich (美しいCLI出力)
 
 ## プロジェクト構造
 
 ```
 .
-├── MarkdownGen.py                # CLIツール: 単一PDFをOCR処理
-├── util/
-│   └── markdown_utils.py        # Markdown変換ユーティリティ
-├── sample.pdf                    # OCR対象のサンプルPDFファイル
-├── result/                       # OCR結果の出力ディレクトリ
-│   ├── ocr_result.json          # OCR結果のJSON形式
-│   └── ocr_result.md            # OCR結果のMarkdown形式
-├── .env                          # 環境変数（APIキーなど）
-└── mistral-ocr-web/              # Webアプリケーション（Next.js）
-    ├── src/
-    │   ├── app/                  # App Router
-    │   │   ├── page.tsx         # メインページ
-    │   │   └── api/ocr/route.ts # OCR APIエンドポイント
-    │   ├── components/           # Reactコンポーネント
-    │   └── lib/                  # ロジック・ユーティリティ
-    ├── package.json
-    ├── next.config.js
-    ├── vercel.json              # Vercelデプロイ設定
-    └── README.md                # Webアプリケーションのドキュメント
+├── pyproject.toml                 # プロジェクト設定
+├── .env                           # 環境変数 (MISTRALAI_API_KEY)
+├── README.md                      # ドキュメント
+│
+├── src/
+│   └── mistral_ocr/              # メインパッケージ
+│       ├── __init__.py
+│       ├── __main__.py           # python -m mistral_ocr エントリーポイント
+│       ├── cli.py                # Click CLI定義
+│       ├── client.py             # Mistral API クライアント
+│       ├── markdown_generator.py # Markdown生成・図表付番
+│       ├── validators.py         # ファイル検証
+│       └── types.py              # 型定義
+│
+└── result/                       # OCR結果出力
+    ├── *.md                      # Markdownファイル
+    └── images/                   # 抽出画像ファイル
+        └── figure_*.jpg          # 図画像 (連番)
 ```
 
-## アーキテクチャと実装の詳細
+## 開発環境セットアップ
+
+### 仮想環境のセットアップ
+
+```bash
+# プロジェクトセットアップ (仮想環境作成 + 依存関係インストール)
+uv sync
+
+# 開発モードでインストール
+uv pip install -e .
+```
+
+### 依存関係追加
+
+```bash
+uv add <package-name>
+```
+
+### 実行方法
+
+```bash
+# uv run を使用（推奨）
+uv run mistral-ocr process sample.pdf
+
+# 仮想環境を有効化してから実行
+source .venv/bin/activate
+mistral-ocr process sample.pdf
+
+# モジュールとして実行
+python -m mistral_ocr process sample.pdf
+```
+
+## 主要機能
+
+1. **図表自動付番**
+   - 画像: `![図N](images/figure_N.jpg)\n\n**図N**` (外部ファイルとして保存)
+   - 表: Markdown表構文を検出し `**表N**` を挿入
+
+2. **ファイル検証**
+   - ファイルサイズ: 最大50MB (Mistral API上限)
+   - ページ数: 最大1000ページ (Mistral API上限)
+
+3. **出力形式**
+   - Markdown: 図表番号付きMarkdown (デフォルト)
+   - JSON: OCR API生レスポンス (オプション)
+
+## アーキテクチャ詳細
 
 ### ワークフロー
 
-1. **ファイルアップロード**: `client.files.upload()` を使用してPDFファイルをMistral AIにアップロード
-2. **署名付きURL取得**: `client.files.get_signed_url()` でアップロードしたファイルの一時URLを取得
-3. **OCR処理**: `client.ocr.process()` でPDFをOCR処理（`mistral-ocr-latest` モデル使用）
-4. **結果の保存**:
-   - JSON形式で生データを保存
-   - `util.markdown_utils.get_combined_markdown()` を使用してMarkdown形式に変換して保存
+1. **ファイル検証** (`validators.py`)
+   - pypdfでページ数、ファイルサイズチェック
 
-### 重要な設計上の注意点
+2. **ファイルアップロード** (`client.py`)
+   - `client.files.upload()` でMistral AIにアップロード
 
-- **`util/markdown_utils.py` モジュール**:
-  - `MarkdownGen.py:6` でインポートされているが、まだ実装されていない
-  - `get_combined_markdown(pdf_response)` 関数を実装する必要がある
-  - この関数は `client.ocr.process()` のレスポンスオブジェクトを受け取り、統合されたMarkdown文字列を返す
+3. **署名付きURL取得** (`client.py`)
+   - `client.files.get_signed_url()` で一時URL取得 (有効期限1時間)
 
-- **OCRレスポンスの構造**:
-  - `include_image_base64=True` オプションで画像データも含まれる
-  - レスポンスは `pdf_response.model_dump_json()` でJSON形式に変換可能
+4. **OCR処理** (`client.py`)
+   - `client.ocr.process()` でPDFをOCR (mistral-ocr-latest)
+   - `include_image_base64=True` でBase64画像埋め込み
 
-## 実行方法
+5. **Markdown生成** (`markdown_generator.py`)
+   - 図表自動付番ロジック適用
+   - 画像を外部ファイルとして保存 (images/figure_*.jpg)
+   - ページヘッダー、区切り線追加 (オプション)
 
-### メインスクリプトの実行
-```bash
-python MarkdownGen.py
+6. **結果保存** (`cli.py`)
+   - Markdown形式で出力 (デフォルト)
+   - JSONも出力可能 (--format bothまたはjson)
+
+### 図表自動付番ロジック (TypeScriptから移植)
+
+**画像処理:**
+```python
+# page.images を走査
+for image in page.images:
+    counter.image_count += 1
+
+    # Base64画像を外部ファイルとして保存
+    image_path = _save_image(
+        image.image_base64,
+        output_dir,
+        counter.image_count
+    )  # 戻り値: "images/figure_001.jpg"
+
+    # ![img-X.jpeg](img-X.jpeg) を検出
+    pattern = re.compile(rf"!\[{re.escape(image.id)}\]\({re.escape(image.id)}\)")
+    # ![図N](images/figure_N.jpg)\n\n**図N** に置換
+    replacement = f"![図{counter.image_count}]({image_path})\n\n**図{counter.image_count}**"
+    page_markdown = pattern.sub(replacement, page_markdown)
 ```
 
-実行前の確認事項:
-1. `.env` ファイルに正しいAPIキーが設定されていること
-2. `sample.pdf` ファイルが存在すること
-3. `result/` ディレクトリが存在すること（存在しない場合は自動作成されない）
-4. `util/markdown_utils.py` が実装されていること
-
-## テストとデバッグ
-
-現時点でテストフレームワークは設定されていない。
-
-デバッグには以下を推奨:
-- IPythonがインストール済みなので、対話的デバッグが可能
-- OCR結果のJSON出力を確認して、レスポンス構造を理解する
-
-## Webアプリケーション (`mistral-ocr-web/`)
-
-### 開発コマンド
-
-```bash
-cd mistral-ocr-web
-
-# 開発サーバーの起動
-npm run dev
-
-# ビルド
-npm run build
-
-# 本番サーバーの起動
-npm run start
-
-# Linter
-npm run lint
+**表処理:**
+```python
+# Markdown表構文 (|...|) を検出
+is_table_line = bool(re.match(r"^\s*\|.+\|\s*$", line))
+if is_table_line and not in_table:
+    in_table = True
+    counter.table_count += 1
+    result.append(f"**表{counter.table_count}**")
+    result.append(line)
 ```
 
-### 主要機能
+## コマンドラインオプション
 
-- 複数PDFのドラッグ&ドロップアップロード
-- ファイル順序の変更（ドラッグ&ドロップ）
-- 統合Markdown生成（複数PDFを一つなぎに変換）
-- 図表番号の自動付番（図1, 図2... / 表1, 表2...）
-- Base64画像埋め込み
-- Markdownプレビュー表示
-- ダウンロード機能
+| オプション | 説明 | デフォルト |
+|-----------|------|----------|
+| `-o, --output` | 出力先ディレクトリ | `./result` |
+| `--page-headers` | ページヘッダー (# Page N) を含める | False (デフォルトで非表示) |
+| `--format` | 出力形式 (`markdown`, `json`, `both`) | `markdown` |
+| `--filename` | 出力ファイル名 (拡張子不要) | `ocr_result_YYYYMMDD_HHMMSS` |
+| `--api-key` | Mistral API キー (.envより優先) | 環境変数 |
+| `--max-size` | 最大ファイルサイズ (MB) | 50 |
+| `--max-pages` | 最大ページ数 | 1000 |
 
-### 技術スタック
-
-- Next.js 14 (App Router)
-- TypeScript
-- Tailwind CSS
-- react-dropzone: ドラッグ&ドロップUI
-- @dnd-kit: ファイル順序変更
-- react-markdown: Markdownレンダリング
-
-### 環境変数
-
-Webアプリケーションの `.env.local` ファイル:
-
-```
-MISTRALAI_API_KEY=your_api_key_here
-```
-
-### Vercelデプロイ
+## テスト
 
 ```bash
-# Vercel CLIでデプロイ
-cd mistral-ocr-web
-vercel --prod
-```
+# 基本的な使用
+uv run mistral-ocr process sample.pdf
 
-Vercelダッシュボードで環境変数 `MISTRALAI_API_KEY` を設定すること。
+# カスタム出力先
+uv run mistral-ocr process sample.pdf -o ~/output
+
+# ページヘッダー付き、JSONも出力
+uv run mistral-ocr process sample.pdf --page-headers --format both
+```
 
 ## コーディング規約
 
 - コメントは日本語で記述
 - シンプルで読みやすいコードを心がける
-- 環境変数は `.env` / `.env.local` ファイルで管理
-- TypeScript: 型安全性を重視
+- 型ヒント (type hints) を積極的に使用
+- 環境変数は `.env` ファイルで管理
+
+## 重要な注意点
+
+- `.env` ファイルには実際のAPIキーが含まれるため、Gitにコミットしない
+- `result/` ディレクトリ内の生成ファイルはGit管理外
+- 単一PDFのみ対応 (複数PDFは将来実装予定)
+- macOS環境でgit cloneして動作することを目指した設計
+
+## Mistral OCR API制約
+
+- ファイルサイズ: 最大50MB
+- ページ数: 最大1000ページ
+- 価格: 1000ページあたり2ドル
