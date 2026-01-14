@@ -1,0 +1,34 @@
+[project]
+name = "mistral-ocr"
+version = "1.0.0"
+description = "Mistral AI OCR CLI tool for PDF to Markdown conversion with figure/table numbering"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mistralai>=1.10.0",
+    "click>=8.1.0",
+    "python-dotenv>=1.0.0",
+    "pypdf>=4.0.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "black>=24.0.0",
+    "ruff>=0.6.0",
+]
+
+[project.scripts]
+mistral-ocr = "mistral_ocr.cli:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "black>=24.0.0",
+    "ruff>=0.6.0",
+]
